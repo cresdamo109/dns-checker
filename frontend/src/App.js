@@ -49,7 +49,7 @@ function App() {
   return (
     <div className="App">
       <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
-        <div className="container mx-auto px-4 py-12 max-w-5xl">
+        <div className="container mx-auto px-4 py-12 max-w-6xl">
           {/* Header */}
           <div className="text-center mb-12">
             <h1 className="text-5xl font-bold mb-4 bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
@@ -58,6 +58,9 @@ function App() {
             <p className="text-lg text-gray-600">
               Check if an IP address is listed in DNS blacklists (DNSBL/RBL)
             </p>
+            <p className="text-sm text-gray-500 mt-2">
+              Supports both IPv4 and IPv6 addresses
+            </p>
           </div>
 
           {/* Search Card */}
@@ -65,7 +68,7 @@ function App() {
             <CardHeader>
               <CardTitle className="text-2xl">IP Address to Check</CardTitle>
               <CardDescription>
-                Enter an IPv4 address to check against multiple DNS blacklists
+                Enter an IPv4 or IPv6 address to check against multiple DNS blacklists
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -73,7 +76,7 @@ function App() {
                 <Input
                   data-testid="ip-input"
                   type="text"
-                  placeholder="e.g., 8.8.8.8"
+                  placeholder="IPv4: 8.8.8.8 or IPv6: 2001:4860:4860::8888"
                   value={ipAddress}
                   onChange={(e) => setIpAddress(e.target.value)}
                   onKeyPress={handleKeyPress}
@@ -116,14 +119,20 @@ function App() {
               {/* Summary Card */}
               <Card className="shadow-lg border-0 bg-white/80 backdrop-blur-sm">
                 <CardContent className="pt-6">
-                  <div className="flex items-center justify-between flex-wrap gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
-                      <p className="text-sm text-gray-600 mb-1">Checked IP Address</p>
-                      <p className="text-2xl font-bold text-gray-800">{results.query_ip}</p>
+                      <p className="text-sm text-gray-600 mb-1">IP Address</p>
+                      <p className="text-xl font-bold text-gray-800 break-all">{results.query_ip}</p>
                     </div>
                     <div>
-                      <p className="text-sm text-gray-600 mb-1">Reversed IP (for DNSBL lookup)</p>
-                      <p className="text-xl font-mono text-gray-700">{results.reversed_ip}</p>
+                      <p className="text-sm text-gray-600 mb-1">IP Version</p>
+                      <Badge className="bg-blue-600 hover:bg-blue-700 text-base px-3 py-1">
+                        {results.ip_version}
+                      </Badge>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-600 mb-1">Reversed (for DNSBL)</p>
+                      <p className="text-sm font-mono text-gray-700 break-all">{results.reversed_ip}</p>
                     </div>
                   </div>
                 </CardContent>
@@ -133,7 +142,15 @@ function App() {
               <Alert className="bg-blue-50 border-blue-200" data-testid="info-alert">
                 <Info className="h-4 w-4 text-blue-600" />
                 <AlertDescription className="text-blue-800">
-                  Each blacklist is queried by looking up: <span className="font-mono">{results.reversed_ip}.[domain]</span>
+                  {results.ip_version === "IPv4" ? (
+                    <>
+                      <strong>IPv4 Lookup:</strong> Each blacklist is queried by looking up: <span className="font-mono">{results.reversed_ip}.[domain]</span>
+                    </>
+                  ) : (
+                    <>
+                      <strong>IPv6 Lookup:</strong> The IPv6 address is expanded and reversed nibble-by-nibble, then queried as: <span className="font-mono break-all">{results.reversed_ip.substring(0, 50)}...</span>
+                    </>
+                  )}
                   <br />
                   If a DNS A record is returned, the IP is listed on that blacklist.
                 </AlertDescription>
@@ -151,7 +168,7 @@ function App() {
                       className="shadow-md border-0 bg-white/80 backdrop-blur-sm hover:shadow-lg transition-shadow"
                     >
                       <CardHeader className="pb-3">
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
                           <CardTitle className="text-xl text-gray-800">
                             {result.domain}
                           </CardTitle>
@@ -206,30 +223,44 @@ function App() {
           {!results && !error && !loading && (
             <Card className="bg-white/60 backdrop-blur-sm border-0 shadow-md" data-testid="info-card">
               <CardContent className="pt-6">
-                <h3 className="text-lg font-semibold mb-3 text-gray-800">Blacklists checked:</h3>
-                <ul className="space-y-2 text-gray-700">
-                  <li className="flex items-center">
-                    <span className="w-2 h-2 bg-emerald-600 rounded-full mr-3"></span>
-                    wl.none.hjrp-server.com
-                  </li>
-                  <li className="flex items-center">
-                    <span className="w-2 h-2 bg-teal-600 rounded-full mr-3"></span>
-                    wl.med.hjrp-server.com
-                  </li>
-                  <li className="flex items-center">
-                    <span className="w-2 h-2 bg-cyan-600 rounded-full mr-3"></span>
-                    wl.hi.hjrp-server.com
-                  </li>
-                  <li className="flex items-center">
-                    <span className="w-2 h-2 bg-blue-600 rounded-full mr-3"></span>
-                    bl.hjrp-server.com
-                  </li>
-                </ul>
-                <div className="mt-6 p-4 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-lg">
-                  <p className="text-sm text-gray-700">
-                    <strong>How it works:</strong> Your IP is reversed (e.g., 1.2.3.4 becomes 4.3.2.1) and combined with each blacklist domain. 
-                    If a DNS record is found, your IP is listed on that blacklist.
-                  </p>
+                <div className="grid md:grid-cols-2 gap-6">
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3 text-gray-800">Blacklists checked:</h3>
+                    <ul className="space-y-2 text-gray-700">
+                      <li className="flex items-center">
+                        <span className="w-2 h-2 bg-emerald-600 rounded-full mr-3"></span>
+                        wl.none.hjrp-server.com
+                      </li>
+                      <li className="flex items-center">
+                        <span className="w-2 h-2 bg-teal-600 rounded-full mr-3"></span>
+                        wl.med.hjrp-server.com
+                      </li>
+                      <li className="flex items-center">
+                        <span className="w-2 h-2 bg-cyan-600 rounded-full mr-3"></span>
+                        wl.hi.hjrp-server.com
+                      </li>
+                      <li className="flex items-center">
+                        <span className="w-2 h-2 bg-blue-600 rounded-full mr-3"></span>
+                        bl.hjrp-server.com
+                      </li>
+                    </ul>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3 text-gray-800">How it works:</h3>
+                    <div className="space-y-3 text-sm text-gray-700">
+                      <div className="p-3 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-lg">
+                        <p className="font-semibold mb-1">IPv4 Example:</p>
+                        <p>1.2.3.4 → 4.3.2.1.[domain]</p>
+                      </div>
+                      <div className="p-3 bg-gradient-to-r from-teal-50 to-cyan-50 rounded-lg">
+                        <p className="font-semibold mb-1">IPv6 Example:</p>
+                        <p className="break-all">2001:db8::1 → 1.0.0.0...8.b.d.0.1.0.0.2.[domain]</p>
+                      </div>
+                      <p className="text-xs text-gray-600 mt-2">
+                        If a DNS A record is found, the IP is listed on that blacklist.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </CardContent>
             </Card>

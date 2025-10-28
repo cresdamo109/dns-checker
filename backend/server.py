@@ -52,6 +52,7 @@ class DNSQueryResult(BaseModel):
 class DNSQueryResponse(BaseModel):
     query_ip: str
     reversed_ip: str
+    ip_version: str
     results: List[DNSQueryResult]
 
 # Add your routes to the router instead of directly to app
@@ -83,13 +84,26 @@ async def get_status_checks():
     
     return status_checks
 
-def reverse_ip(ip: str) -> str:
+def reverse_ipv4(ip: str) -> str:
     """
-    Reverse an IP address for DNSBL lookup
+    Reverse an IPv4 address for DNSBL lookup
     Example: 192.168.1.1 -> 1.1.168.192
     """
     parts = ip.split('.')
     return '.'.join(reversed(parts))
+
+def reverse_ipv6(ip: str) -> str:
+    """
+    Reverse an IPv6 address for DNSBL lookup
+    Example: 2001:db8::1 -> 1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2
+    """
+    # Parse and expand the IPv6 address to full form
+    addr = ipaddress.IPv6Address(ip)
+    # Get the expanded hex string without colons
+    expanded = addr.exploded.replace(':', '')
+    # Reverse each nibble (hex digit) and join with dots
+    reversed_nibbles = '.'.join(reversed(expanded))
+    return reversed_nibbles
 
 def query_dnsbl(reversed_ip: str, domain: str) -> DNSQueryResult:
     """
@@ -145,16 +159,19 @@ def query_dnsbl(reversed_ip: str, domain: str) -> DNSQueryResult:
 @api_router.post("/dns-query", response_model=DNSQueryResponse)
 async def dns_query(request: DNSQueryRequest):
     """
-    Query DNSBL to check if an IP is listed
+    Query DNSBL to check if an IP (IPv4 or IPv6) is listed
     """
+    # Validate and determine IP version
     try:
-        # Validate IP address
-        ipaddress.IPv4Address(request.ip)
+        ip_obj = ipaddress.ip_address(request.ip)
+        if isinstance(ip_obj, ipaddress.IPv4Address):
+            ip_version = "IPv4"
+            reversed_ip = reverse_ipv4(request.ip)
+        else:
+            ip_version = "IPv6"
+            reversed_ip = reverse_ipv6(request.ip)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid IP address format")
-    
-    # Reverse the IP address
-    reversed_ip = reverse_ip(request.ip)
     
     domains = [
         "wl.none.hjrp-server.com",
@@ -171,6 +188,7 @@ async def dns_query(request: DNSQueryRequest):
     return DNSQueryResponse(
         query_ip=request.ip,
         reversed_ip=reversed_ip,
+        ip_version=ip_version,
         results=results
     )
 
