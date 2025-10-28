@@ -1,7 +1,7 @@
 import { useState } from "react";
 import "@/App.css";
 import axios from "axios";
-import { Search, Loader2, AlertCircle, CheckCircle, XCircle, Info } from "lucide-react";
+import { Search, Loader2, AlertCircle, CheckCircle, XCircle, Info, Shield, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,7 +34,7 @@ function App() {
       setResults(response.data);
     } catch (e) {
       console.error(e);
-      setError(e.response?.data?.detail || "Failed to query DNS blacklists. Please check the IP address and try again.");
+      setError(e.response?.data?.detail || "Failed to query DNS lists. Please check the IP address and try again.");
     } finally {
       setLoading(false);
     }
@@ -46,6 +46,85 @@ function App() {
     }
   };
 
+  const getListTypeLabel = (listType) => {
+    return listType === "whitelist" ? "Whitelist" : "Blacklist";
+  };
+
+  const getStatusBadge = (result) => {
+    if (result.error) return null;
+    
+    if (result.list_type === "whitelist") {
+      // For whitelists: being listed is GOOD
+      if (result.is_listed) {
+        return (
+          <Badge className="bg-green-600 hover:bg-green-700 text-sm px-3 py-1" data-testid={`status-whitelisted`}>
+            <Shield className="w-4 h-4 mr-1" />
+            WHITELISTED
+          </Badge>
+        );
+      } else {
+        return (
+          <Badge variant="secondary" className="text-sm px-3 py-1" data-testid={`status-not-whitelisted`}>
+            NOT WHITELISTED
+          </Badge>
+        );
+      }
+    } else {
+      // For blacklists: being listed is BAD
+      if (result.is_listed) {
+        return (
+          <Badge variant="destructive" className="text-sm px-3 py-1" data-testid={`status-blacklisted`}>
+            <ShieldAlert className="w-4 h-4 mr-1" />
+            BLACKLISTED
+          </Badge>
+        );
+      } else {
+        return (
+          <Badge className="bg-green-600 hover:bg-green-700 text-sm px-3 py-1" data-testid={`status-not-blacklisted`}>
+            <CheckCircle className="w-4 h-4 mr-1" />
+            NOT BLACKLISTED
+          </Badge>
+        );
+      }
+    }
+  };
+
+  const getStatusMessage = (result) => {
+    if (result.list_type === "whitelist") {
+      if (result.is_listed) {
+        return (
+          <p className="text-green-700 flex items-center" data-testid="whitelisted-info">
+            <Shield className="h-4 w-4 mr-2" />
+            This IP is whitelisted (trusted)
+          </p>
+        );
+      } else {
+        return (
+          <p className="text-gray-600 flex items-center" data-testid="not-whitelisted-info">
+            <AlertCircle className="h-4 w-4 mr-2" />
+            This IP is not on this whitelist
+          </p>
+        );
+      }
+    } else {
+      if (result.is_listed) {
+        return (
+          <p className="text-red-700 flex items-center" data-testid="blacklisted-info">
+            <ShieldAlert className="h-4 w-4 mr-2" />
+            Warning: This IP is blacklisted
+          </p>
+        );
+      } else {
+        return (
+          <p className="text-green-700 flex items-center" data-testid="not-blacklisted-info">
+            <CheckCircle className="h-4 w-4 mr-2" />
+            This IP is not blacklisted (clean)
+          </p>
+        );
+      }
+    }
+  };
+
   return (
     <div className="App">
       <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
@@ -53,10 +132,10 @@ function App() {
           {/* Header */}
           <div className="text-center mb-12">
             <h1 className="text-5xl font-bold mb-4 bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
-              DNS Blacklist Checker
+              DNS List Checker
             </h1>
             <p className="text-lg text-gray-600">
-              Check if an IP address is listed in DNS blacklists (DNSBL/RBL)
+              Check if an IP address is listed in DNS whitelists or blacklists
             </p>
             <p className="text-sm text-gray-500 mt-2">
               Supports both IPv4 and IPv6 addresses
@@ -68,7 +147,7 @@ function App() {
             <CardHeader>
               <CardTitle className="text-2xl">IP Address to Check</CardTitle>
               <CardDescription>
-                Enter an IPv4 or IPv6 address to check against multiple DNS blacklists
+                Enter an IPv4 or IPv6 address to check against whitelists and blacklists
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -131,7 +210,7 @@ function App() {
                       </Badge>
                     </div>
                     <div>
-                      <p className="text-sm text-gray-600 mb-1">Reversed (for DNSBL)</p>
+                      <p className="text-sm text-gray-600 mb-1">Reversed (for DNS lookup)</p>
                       <p className="text-sm font-mono text-gray-700 break-all">{results.reversed_ip}</p>
                     </div>
                   </div>
@@ -142,78 +221,112 @@ function App() {
               <Alert className="bg-blue-50 border-blue-200" data-testid="info-alert">
                 <Info className="h-4 w-4 text-blue-600" />
                 <AlertDescription className="text-blue-800">
-                  {results.ip_version === "IPv4" ? (
-                    <>
-                      <strong>IPv4 Lookup:</strong> Each blacklist is queried by looking up: <span className="font-mono">{results.reversed_ip}.[domain]</span>
-                    </>
-                  ) : (
-                    <>
-                      <strong>IPv6 Lookup:</strong> The IPv6 address is expanded and reversed nibble-by-nibble, then queried as: <span className="font-mono break-all">{results.reversed_ip.substring(0, 50)}...</span>
-                    </>
-                  )}
+                  <strong>How it works:</strong> Each list is queried using the reversed IP format.
                   <br />
-                  If a DNS A record is returned, the IP is listed on that blacklist.
+                  <span className="text-sm">• <strong>Whitelists (wl.*)</strong>: Being listed = Trusted/Safe</span>
+                  <br />
+                  <span className="text-sm">• <strong>Blacklists (bl.*)</strong>: Being listed = Blocked/Suspicious</span>
                 </AlertDescription>
               </Alert>
 
-              {/* Blacklist Results */}
-              <div className="space-y-4">
-                <h2 className="text-2xl font-semibold text-gray-800 mb-4">Blacklist Results</h2>
-                
-                <div className="grid gap-4">
-                  {results.results.map((result, index) => (
-                    <Card
-                      key={index}
-                      data-testid={`result-card-${index}`}
-                      className="shadow-md border-0 bg-white/80 backdrop-blur-sm hover:shadow-lg transition-shadow"
-                    >
-                      <CardHeader className="pb-3">
-                        <div className="flex items-center justify-between flex-wrap gap-2">
-                          <CardTitle className="text-xl text-gray-800">
-                            {result.domain}
-                          </CardTitle>
-                          {!result.error && (
-                            result.is_listed ? (
-                              <Badge variant="destructive" className="text-sm px-3 py-1" data-testid={`status-listed-${index}`}>
-                                <XCircle className="w-4 h-4 mr-1" />
-                                LISTED
-                              </Badge>
-                            ) : (
-                              <Badge className="bg-green-600 hover:bg-green-700 text-sm px-3 py-1" data-testid={`status-not-listed-${index}`}>
-                                <CheckCircle className="w-4 h-4 mr-1" />
-                                NOT LISTED
-                              </Badge>
-                            )
+              {/* Results organized by type */}
+              <div className="space-y-6">
+                {/* Whitelists */}
+                <div>
+                  <h2 className="text-2xl font-semibold text-gray-800 mb-4 flex items-center">
+                    <Shield className="w-6 h-6 mr-2 text-green-600" />
+                    Whitelists
+                  </h2>
+                  <div className="grid gap-4">
+                    {results.results.filter(r => r.list_type === "whitelist").map((result, index) => (
+                      <Card
+                        key={index}
+                        data-testid={`result-card-whitelist-${index}`}
+                        className="shadow-md border-0 bg-white/80 backdrop-blur-sm hover:shadow-lg transition-shadow"
+                      >
+                        <CardHeader className="pb-3">
+                          <div className="flex items-center justify-between flex-wrap gap-2">
+                            <CardTitle className="text-xl text-gray-800">
+                              {result.domain}
+                            </CardTitle>
+                            {getStatusBadge(result)}
+                          </div>
+                        </CardHeader>
+                        <CardContent>
+                          {result.error ? (
+                            <div className="flex items-center text-amber-600" data-testid={`error-${index}`}>
+                              <AlertCircle className="h-4 w-4 mr-2" />
+                              <span>{result.error}</span>
+                            </div>
+                          ) : result.is_listed ? (
+                            <div className="space-y-2" data-testid={`listed-info-${index}`}>
+                              {getStatusMessage(result)}
+                              <p className="text-sm text-gray-600 mt-2">Response:</p>
+                              {result.response_ips.map((ip, ipIndex) => (
+                                <div
+                                  key={ipIndex}
+                                  className="px-4 py-2 bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg font-mono text-gray-800 border border-green-200"
+                                >
+                                  {ip}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            getStatusMessage(result)
                           )}
-                        </div>
-                      </CardHeader>
-                      <CardContent>
-                        {result.error ? (
-                          <div className="flex items-center text-amber-600" data-testid={`error-${index}`}>
-                            <AlertCircle className="h-4 w-4 mr-2" />
-                            <span>{result.error}</span>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Blacklists */}
+                <div>
+                  <h2 className="text-2xl font-semibold text-gray-800 mb-4 flex items-center">
+                    <ShieldAlert className="w-6 h-6 mr-2 text-red-600" />
+                    Blacklists
+                  </h2>
+                  <div className="grid gap-4">
+                    {results.results.filter(r => r.list_type === "blacklist").map((result, index) => (
+                      <Card
+                        key={index}
+                        data-testid={`result-card-blacklist-${index}`}
+                        className="shadow-md border-0 bg-white/80 backdrop-blur-sm hover:shadow-lg transition-shadow"
+                      >
+                        <CardHeader className="pb-3">
+                          <div className="flex items-center justify-between flex-wrap gap-2">
+                            <CardTitle className="text-xl text-gray-800">
+                              {result.domain}
+                            </CardTitle>
+                            {getStatusBadge(result)}
                           </div>
-                        ) : result.is_listed ? (
-                          <div className="space-y-2" data-testid={`listed-info-${index}`}>
-                            <p className="text-sm text-gray-600 mb-2">This IP is listed on this blacklist. Response:</p>
-                            {result.response_ips.map((ip, ipIndex) => (
-                              <div
-                                key={ipIndex}
-                                className="px-4 py-2 bg-gradient-to-r from-red-50 to-orange-50 rounded-lg font-mono text-gray-800 border border-red-200"
-                              >
-                                {ip}
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="text-green-700 flex items-center" data-testid={`not-listed-info-${index}`}>
-                            <CheckCircle className="h-4 w-4 mr-2" />
-                            This IP is not listed on this blacklist (clean)
-                          </p>
-                        )}
-                      </CardContent>
-                    </Card>
-                  ))}
+                        </CardHeader>
+                        <CardContent>
+                          {result.error ? (
+                            <div className="flex items-center text-amber-600" data-testid={`error-bl-${index}`}>
+                              <AlertCircle className="h-4 w-4 mr-2" />
+                              <span>{result.error}</span>
+                            </div>
+                          ) : result.is_listed ? (
+                            <div className="space-y-2" data-testid={`listed-info-bl-${index}`}>
+                              {getStatusMessage(result)}
+                              <p className="text-sm text-gray-600 mt-2">Response:</p>
+                              {result.response_ips.map((ip, ipIndex) => (
+                                <div
+                                  key={ipIndex}
+                                  className="px-4 py-2 bg-gradient-to-r from-red-50 to-orange-50 rounded-lg font-mono text-gray-800 border border-red-200"
+                                >
+                                  {ip}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            getStatusMessage(result)
+                          )}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
@@ -225,7 +338,10 @@ function App() {
               <CardContent className="pt-6">
                 <div className="grid md:grid-cols-2 gap-6">
                   <div>
-                    <h3 className="text-lg font-semibold mb-3 text-gray-800">Blacklists checked:</h3>
+                    <h3 className="text-lg font-semibold mb-3 text-gray-800 flex items-center">
+                      <Shield className="w-5 h-5 mr-2 text-green-600" />
+                      Whitelists checked:
+                    </h3>
                     <ul className="space-y-2 text-gray-700">
                       <li className="flex items-center">
                         <span className="w-2 h-2 bg-emerald-600 rounded-full mr-3"></span>
@@ -239,28 +355,27 @@ function App() {
                         <span className="w-2 h-2 bg-cyan-600 rounded-full mr-3"></span>
                         wl.hi.hjrp-server.com
                       </li>
+                    </ul>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3 text-gray-800 flex items-center">
+                      <ShieldAlert className="w-5 h-5 mr-2 text-red-600" />
+                      Blacklists checked:
+                    </h3>
+                    <ul className="space-y-2 text-gray-700">
                       <li className="flex items-center">
-                        <span className="w-2 h-2 bg-blue-600 rounded-full mr-3"></span>
+                        <span className="w-2 h-2 bg-red-600 rounded-full mr-3"></span>
                         bl.hjrp-server.com
                       </li>
                     </ul>
                   </div>
-                  <div>
-                    <h3 className="text-lg font-semibold mb-3 text-gray-800">How it works:</h3>
-                    <div className="space-y-3 text-sm text-gray-700">
-                      <div className="p-3 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-lg">
-                        <p className="font-semibold mb-1">IPv4 Example:</p>
-                        <p>1.2.3.4 → 4.3.2.1.[domain]</p>
-                      </div>
-                      <div className="p-3 bg-gradient-to-r from-teal-50 to-cyan-50 rounded-lg">
-                        <p className="font-semibold mb-1">IPv6 Example:</p>
-                        <p className="break-all">2001:db8::1 → 1.0.0.0...8.b.d.0.1.0.0.2.[domain]</p>
-                      </div>
-                      <p className="text-xs text-gray-600 mt-2">
-                        If a DNS A record is found, the IP is listed on that blacklist.
-                      </p>
-                    </div>
-                  </div>
+                </div>
+                <div className="mt-6 p-4 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-lg">
+                  <p className="text-sm text-gray-700">
+                    <strong>Understanding the results:</strong>
+                    <br />• If an IP is <strong>whitelisted</strong>, it's considered trusted or safe
+                    <br />• If an IP is <strong>blacklisted</strong>, it may be blocked or flagged as suspicious
+                  </p>
                 </div>
               </CardContent>
             </Card>

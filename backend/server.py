@@ -45,6 +45,7 @@ class DNSQueryRequest(BaseModel):
 
 class DNSQueryResult(BaseModel):
     domain: str
+    list_type: str  # "whitelist" or "blacklist"
     is_listed: bool
     response_ips: List[str]
     error: Optional[str] = None
@@ -105,14 +106,25 @@ def reverse_ipv6(ip: str) -> str:
     reversed_nibbles = '.'.join(reversed(expanded))
     return reversed_nibbles
 
+def determine_list_type(domain: str) -> str:
+    """
+    Determine if domain is a whitelist or blacklist
+    """
+    if domain.startswith('wl.'):
+        return "whitelist"
+    elif domain.startswith('bl.'):
+        return "blacklist"
+    return "unknown"
+
 def query_dnsbl(reversed_ip: str, domain: str) -> DNSQueryResult:
     """
-    Query DNSBL to check if IP is listed
+    Query DNSBL/whitelist to check if IP is listed
     """
     query_domain = f"{reversed_ip}.{domain}"
+    list_type = determine_list_type(domain)
     
     try:
-        # Query A records for the reversed IP + blacklist domain
+        # Query A records for the reversed IP + list domain
         resolver = dns.resolver.Resolver()
         resolver.timeout = 5
         resolver.lifetime = 5
@@ -122,14 +134,16 @@ def query_dnsbl(reversed_ip: str, domain: str) -> DNSQueryResult:
         
         return DNSQueryResult(
             domain=domain,
+            list_type=list_type,
             is_listed=True,
             response_ips=response_ips,
             error=None
         )
     except dns.resolver.NXDOMAIN:
-        # NXDOMAIN means the IP is NOT listed (which is good)
+        # NXDOMAIN means the IP is NOT listed
         return DNSQueryResult(
             domain=domain,
+            list_type=list_type,
             is_listed=False,
             response_ips=[],
             error=None
@@ -137,6 +151,7 @@ def query_dnsbl(reversed_ip: str, domain: str) -> DNSQueryResult:
     except dns.resolver.NoAnswer:
         return DNSQueryResult(
             domain=domain,
+            list_type=list_type,
             is_listed=False,
             response_ips=[],
             error="No answer from DNS server"
@@ -144,6 +159,7 @@ def query_dnsbl(reversed_ip: str, domain: str) -> DNSQueryResult:
     except dns.resolver.Timeout:
         return DNSQueryResult(
             domain=domain,
+            list_type=list_type,
             is_listed=False,
             response_ips=[],
             error="Query timeout"
@@ -151,6 +167,7 @@ def query_dnsbl(reversed_ip: str, domain: str) -> DNSQueryResult:
     except Exception as e:
         return DNSQueryResult(
             domain=domain,
+            list_type=list_type,
             is_listed=False,
             response_ips=[],
             error=f"Error: {str(e)}"
@@ -159,7 +176,7 @@ def query_dnsbl(reversed_ip: str, domain: str) -> DNSQueryResult:
 @api_router.post("/dns-query", response_model=DNSQueryResponse)
 async def dns_query(request: DNSQueryRequest):
     """
-    Query DNSBL to check if an IP (IPv4 or IPv6) is listed
+    Query DNS lists to check if an IP (IPv4 or IPv6) is listed
     """
     # Validate and determine IP version
     try:
@@ -180,7 +197,7 @@ async def dns_query(request: DNSQueryRequest):
         "bl.hjrp-server.com"
     ]
     
-    # Run DNSBL queries in parallel
+    # Run DNS list queries in parallel
     loop = asyncio.get_event_loop()
     tasks = [loop.run_in_executor(None, query_dnsbl, reversed_ip, domain) for domain in domains]
     results = await asyncio.gather(*tasks)
