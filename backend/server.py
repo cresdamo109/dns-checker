@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timezone
 import dns.resolver
 import asyncio
+import ipaddress
 
 
 ROOT_DIR = Path(__file__).parent
@@ -44,11 +45,13 @@ class DNSQueryRequest(BaseModel):
 
 class DNSQueryResult(BaseModel):
     domain: str
-    ip_addresses: List[str]
+    is_listed: bool
+    response_ips: List[str]
     error: Optional[str] = None
 
 class DNSQueryResponse(BaseModel):
     query_ip: str
+    reversed_ip: str
     results: List[DNSQueryResult]
 
 # Add your routes to the router instead of directly to app
@@ -80,56 +83,79 @@ async def get_status_checks():
     
     return status_checks
 
-def query_dns(domain: str, query_ip: str) -> DNSQueryResult:
+def reverse_ip(ip: str) -> str:
     """
-    Query DNS A records for a domain with the provided IP
+    Reverse an IP address for DNSBL lookup
+    Example: 192.168.1.1 -> 1.1.168.192
     """
+    parts = ip.split('.')
+    return '.'.join(reversed(parts))
+
+def query_dnsbl(reversed_ip: str, domain: str) -> DNSQueryResult:
+    """
+    Query DNSBL to check if IP is listed
+    """
+    query_domain = f"{reversed_ip}.{domain}"
+    
     try:
-        # Create a custom resolver
+        # Query A records for the reversed IP + blacklist domain
         resolver = dns.resolver.Resolver()
-        resolver.nameservers = [query_ip]  # Use the provided IP as DNS server
         resolver.timeout = 5
         resolver.lifetime = 5
         
-        # Query A records
-        answers = resolver.resolve(domain, 'A')
-        ip_addresses = [str(rdata) for rdata in answers]
+        answers = resolver.resolve(query_domain, 'A')
+        response_ips = [str(rdata) for rdata in answers]
         
         return DNSQueryResult(
             domain=domain,
-            ip_addresses=ip_addresses,
+            is_listed=True,
+            response_ips=response_ips,
+            error=None
+        )
+    except dns.resolver.NXDOMAIN:
+        # NXDOMAIN means the IP is NOT listed (which is good)
+        return DNSQueryResult(
+            domain=domain,
+            is_listed=False,
+            response_ips=[],
             error=None
         )
     except dns.resolver.NoAnswer:
         return DNSQueryResult(
             domain=domain,
-            ip_addresses=[],
-            error="No A records found"
-        )
-    except dns.resolver.NXDOMAIN:
-        return DNSQueryResult(
-            domain=domain,
-            ip_addresses=[],
-            error="Domain does not exist"
+            is_listed=False,
+            response_ips=[],
+            error="No answer from DNS server"
         )
     except dns.resolver.Timeout:
         return DNSQueryResult(
             domain=domain,
-            ip_addresses=[],
+            is_listed=False,
+            response_ips=[],
             error="Query timeout"
         )
     except Exception as e:
         return DNSQueryResult(
             domain=domain,
-            ip_addresses=[],
+            is_listed=False,
+            response_ips=[],
             error=f"Error: {str(e)}"
         )
 
 @api_router.post("/dns-query", response_model=DNSQueryResponse)
 async def dns_query(request: DNSQueryRequest):
     """
-    Query DNS A records for multiple domains using the provided IP as DNS server
+    Query DNSBL to check if an IP is listed
     """
+    try:
+        # Validate IP address
+        ipaddress.IPv4Address(request.ip)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid IP address format")
+    
+    # Reverse the IP address
+    reversed_ip = reverse_ip(request.ip)
+    
     domains = [
         "wl.none.hjrp-server.com",
         "wl.med.hjrp-server.com",
@@ -137,13 +163,14 @@ async def dns_query(request: DNSQueryRequest):
         "bl.hjrp-server.com"
     ]
     
-    # Run DNS queries in parallel
+    # Run DNSBL queries in parallel
     loop = asyncio.get_event_loop()
-    tasks = [loop.run_in_executor(None, query_dns, domain, request.ip) for domain in domains]
+    tasks = [loop.run_in_executor(None, query_dnsbl, reversed_ip, domain) for domain in domains]
     results = await asyncio.gather(*tasks)
     
     return DNSQueryResponse(
         query_ip=request.ip,
+        reversed_ip=reversed_ip,
         results=results
     )
 
